@@ -12,7 +12,7 @@ Thanks for helping. Small fixes, bug reports and ideas are all welcome.
 ## Setup
 
 ```bash
-git clone https://github.com/<your-github-username>/ryuk.git
+git clone https://github.com/harsh373/ryuk.git
 cd ryuk
 ./ryuk.sh test      # engine tests, needs Node 18+
 ```
