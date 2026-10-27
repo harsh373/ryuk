@@ -7,7 +7,10 @@ walking around my Fedora desktop, couldn't find one I liked, and built it.
 It is a GNOME Shell extension. It works offline, has no account or login, and
 does not start by itself when you log in.
 
-![Ryuk on the desktop](docs/image1.jpg)
+![Ryuk on the desktop](docs/image1.png)
+
+**Download:** [latest release](https://github.com/harsh373/ryuk/releases/latest) ·
+**Report a bug:** [issues](https://github.com/harsh373/ryuk/issues)
 
 ## What he does
 
@@ -44,7 +47,8 @@ older or newer versions will refuse to load it. X11 is not tested.
 
 ### Option 1: release zip (easiest)
 
-Download `ryuk-vX.Y.Z.zip` and `SHA256SUMS` from the Releases page, then:
+Download `ryuk-vX.Y.Z.zip` and `SHA256SUMS` from the
+[Releases page](https://github.com/harsh373/ryuk/releases), then:
 
 ```bash
 sha256sum -c SHA256SUMS                              # check the download is intact
@@ -61,7 +65,7 @@ gnome-extensions enable ryuk@desktop-companion
 ### Option 2: from git
 
 ```bash
-git clone https://github.com/<your-github-username>/ryuk.git
+git clone https://github.com/harsh373/ryuk.git
 cd ryuk
 chmod +x ryuk.sh tools/clean-sprites.py
 ./ryuk.sh install
@@ -112,6 +116,9 @@ and in again (GNOME keeps old extension code loaded until then).
   direct-scanout optimisation, which can cost a little performance.
 - **Odd poses while climbing or jumping:** poses are mapped from the sprite
   pack's own animation file and may look rough.
+
+Still stuck? [Open an issue](https://github.com/harsh373/ryuk/issues/new/choose)
+and fill in the template (OS, GNOME version, session type, logs).
 
 ## Development
 
