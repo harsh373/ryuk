@@ -1,0 +1,172 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Headless tests for the apple-feeding logic. Runs the real engine under Node (no GNOME needed).
+// Usage: node tools/test-engine.mjs
+import {Engine} from '../ryuk@desktop-companion/lib/engine.js';
+
+let pass = 0, fail = 0;
+const ok = (c, m) => { if (c) pass++; else { fail++; console.log('  FAIL:', m); } };
+const section = n => console.log(`\n# ${n}`);
+const rngOf = seed => { let a = seed >>> 0; return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; };
+const mk = (seed = 1, cfg = {}, bounds) => { const e = new Engine(rngOf(seed)); if (bounds) e.setBounds(bounds); e.setCfg({activity: 3, ...cfg}); return e; };
+// drive it the way extension.js does: sleep for wake() ms, then step
+const run = (e, secs, until, hook) => { let t = 0, n = 0; while (t < secs * 1000 && n++ < 200000) { const ms = e.wake(); if (ms < 0) return t; e.step(ms); t += Math.min(ms, 2500); if (hook) hook(e); if (until && until(e)) return t; } return t; };
+const FEED_ACTS = new Set(['stand', 'walk', 'feedSquat', 'feedUp', 'feedRaise', 'feedEat', 'feedLower', 'feedDone']);
+const clean = e => !e.feeding && e.apple === null && e.pending !== 'feed' && !!e.act;
+const sane = e => [e.x, e.y, e.vx, e.vy].every(Number.isFinite) && (!e.apple || (Number.isFinite(e.apple.x) && Number.isFinite(e.apple.y)));
+
+section('1. full sequence, in order, on the floor');
+{
+    const e = mk(1); run(e, 5);
+    const order = []; let apples = 0, applesAfterGrab = 0, grabbed = false;
+    e.feed(); ok(e.feeding && e.apple, 'feeding starts with an apple');
+    run(e, 120, x => !x.feeding, x => {
+        if (order[order.length - 1] !== x.act.name) order.push(x.act.name);
+        if (x.apple) apples++;
+        if (x.act.name === 'feedSquat' && x.apple && !grabbed) {
+            const gap = Math.abs(x.apple.x - x.x);
+            ok(gap <= 22 * x.s + 6, `he stands next to the apple when he crouches (gap ${gap.toFixed(1)} px)`);
+        }
+        if (x.act.name === 'feedUp') grabbed = true;
+        if (grabbed && x.apple) applesAfterGrab++;
+        ok(!x.feeding || FEED_ACTS.has(x.act.name), `only feeding actions while feeding (saw ${x.act.name})`);
+    });
+    ok(clean(e), 'finished clean');
+    const want = ['stand', 'walk', 'feedSquat', 'feedUp', 'feedRaise', 'feedEat', 'feedLower', 'feedDone'];
+    ok(want.every(w => order.includes(w)), `all stages ran: ${order.join(' > ')}`);
+    ok(order.indexOf('walk') < order.indexOf('feedUp') && order.indexOf('feedRaise') < order.indexOf('feedEat') && order.indexOf('feedEat') < order.indexOf('feedLower'), 'stages in order');
+    ok(apples > 0 && applesAfterGrab === 0, 'apple on the floor until grabbed, never after');
+}
+
+section('2. apple animates while he idles (timer must tick fast during the fall)');
+{
+    const e = mk(2); run(e, 5); e.feed();
+    let steps = 0; run(e, 0.6, null, () => steps++);
+    ok(steps >= 10, `timer ticks during the apple fall (${steps} steps in 0.6 s)`);
+}
+
+section('3. nothing interrupts feeding; no second apple');
+{
+    const e = mk(3, {activity: 3}); run(e, 5); e.feed();
+    const first = e.apple;
+    e.feed(); ok(e.apple === first, 'second feed ignored');
+    for (const t of ['hop', 'climb', 'sleep', 'walk', 'dangle']) e.trigger(t);
+    ok(e.feeding && FEED_ACTS.has(e.act.name), 'menu tricks ignored while feeding');
+    let bad = 0; run(e, 120, x => !x.feeding, x => { if (x.feeding && !FEED_ACTS.has(x.act.name)) bad++; });
+    ok(bad === 0 && clean(e), 'feeding finished uninterrupted');
+}
+
+section('4. cancel (hide) at any moment leaves no broken state');
+{
+    let cases = 0;
+    for (let cut = 0.1; cut < 9; cut += 0.37) {
+        const e = mk(4); run(e, 4); e.feed(); run(e, cut);
+        e.cancelFeed(); cases++;
+        ok(clean(e) && sane(e), `clean after cancel at ${cut.toFixed(2)} s`);
+        run(e, 10); ok(clean(e) && sane(e), `still clean 10 s later (cut ${cut.toFixed(2)})`);
+        e.feed(); run(e, 120, x => !x.feeding); ok(clean(e), `a new feed works after cancel (cut ${cut.toFixed(2)})`);
+    }
+    ok(cases > 20, `${cases} cancel points tried`);
+}
+
+section('5. pause during feeding freezes everything and does not restart movement');
+{
+    const e = mk(5); run(e, 4); e.feed(); run(e, 4);
+    const before = {n: e.act.name, t: e.act.t, x: e.x, ap: e.apple && e.apple.x};
+    e.setCfg({paused: true});
+    ok(e.wake() === -1, 'no timer while paused');
+    for (let i = 0; i < 200; i++) e.step(40);
+    ok(e.act.name === before.n && e.act.t === before.t && e.x === before.x && e.feeding, 'nothing changes while paused');
+    ok((e.apple && e.apple.x) === before.ap, 'apple stays put while paused');
+    e.setCfg({paused: false}); run(e, 120, x => !x.feeding); ok(clean(e), 'resumes and finishes after unpause');
+}
+
+section('6. feed clicked while paused: apple appears, nothing moves until unpaused');
+{
+    const e = mk(6); run(e, 3); e.setCfg({paused: true}); e.feed();
+    const x0 = e.x; for (let i = 0; i < 100; i++) e.step(40);
+    ok(e.x === x0 && e.feeding && e.apple !== null, 'frozen while paused, apple present');
+    e.setCfg({paused: false}); run(e, 120, x => !x.feeding); ok(clean(e), 'completes after unpause');
+}
+
+section('7. drag during feeding cancels it cleanly');
+{
+    const e = mk(7); run(e, 4); e.feed(); run(e, 5);
+    e.beginDrag(300, 300); ok(clean(e) || (!e.feeding && e.apple === null), 'drag clears feeding and apple');
+    e.dragTo(320, 310); e.step(40); e.endDrag(); run(e, 20);
+    ok(clean(e) && sane(e), 'clean after drop');
+    e.feed(); run(e, 120, x => !x.feeding); ok(clean(e), 'feeds normally afterwards');
+}
+
+section('8. feed requested while on a wall / in the air: he falls, lands, then feeds');
+{
+    let walls = 0;
+    for (let seed = 1; seed <= 12; seed++) {
+        const e = mk(seed, {activity: 3}); run(e, 2); e.trigger('climb');
+        run(e, 200, x => x.surface === 'wall');
+        if (e.surface !== 'wall') continue;
+        walls++; e.feed();
+        ok(e.feeding && e.apple === null && e.pending === 'feed', 'feed waits until he is on the floor');
+        run(e, 200, x => !x.feeding);
+        ok(clean(e) && sane(e), `feed from wall completed (seed ${seed})`);
+    }
+    ok(walls >= 3, `${walls} wall cases exercised`);
+}
+
+section('9. he goes back to autonomous movement afterwards');
+{
+    let walked = 0;
+    for (let seed = 1; seed <= 20; seed++) {
+        const e = mk(seed); run(e, 3); e.feed(); run(e, 120, x => !x.feeding);
+        let moved = false; let lastX = e.x;
+        run(e, 300, null, x => { if (Math.abs(x.x - lastX) > 20 || x.surface !== 'floor') moved = true; });
+        if (moved) walked++;
+    }
+    ok(walked >= 18, `autonomous movement resumed in ${walked}/20 runs`);
+}
+
+section('10. apple always lands reachable; narrow screen, big size, slow speed');
+{
+    for (const cfg of [{size: 2, speed: 0.25}, {size: 0.5, speed: 3}, {size: 1, speed: 1}]) {
+        for (let seed = 1; seed <= 10; seed++) {
+            const e = mk(seed, cfg, {x1: 0, y1: 32, x2: 420, y2: 600}); run(e, 2); e.feed();
+            let off = false;
+            const t = run(e, 400, x => !x.feeding, x => { if (x.apple && (x.apple.x < x.b.x1 || x.apple.x > x.b.x2)) off = true; });
+            ok(clean(e) && !off && t < 150000, `feed completes in reasonable time on a narrow screen ${JSON.stringify(cfg)} seed ${seed} (${(t / 1000).toFixed(1)} s)`);
+        }
+    }
+}
+
+section('11. bounds change mid-feed (monitor change / resize)');
+{
+    const e = mk(11); run(e, 3); e.feed(); run(e, 2);
+    e.setBounds({x1: 0, y1: 32, x2: 500, y2: 400}); ok(sane(e), 'sane after bounds change');
+    e.setCfg({size: 1.5}); run(e, 200, x => !x.feeding); ok(clean(e), 'finishes after bounds + size change');
+}
+
+section('12. fuzz: 300 random sessions, invariants checked every step');
+{
+    let violations = 0;
+    for (let seed = 100; seed < 400; seed++) {
+        const r = rngOf(seed), e = mk(seed, {activity: 1 + r() * 2});
+        let paused = false, dragging = false;
+        for (let i = 0; i < 1500; i++) {
+            const op = r();
+            if (op < 0.01) e.feed();
+            else if (op < 0.015) e.cancelFeed();
+            else if (op < 0.02) e.trigger(['walk', 'climb', 'hop', 'sleep'][Math.floor(r() * 4)]);
+            else if (op < 0.024 && !dragging) { e.beginDrag(200 + r() * 600, 200 + r() * 300); dragging = true; }
+            else if (op < 0.03 && dragging) { e.endDrag(); dragging = false; }
+            else if (op < 0.034) { paused = !paused; e.setCfg({paused}); }
+            else if (op < 0.036) e.setBounds({x1: 0, y1: 32, x2: 300 + r() * 1500, y2: 400 + r() * 600});
+            else if (op < 0.038) e.setCfg({size: 0.5 + r() * 1.5});
+            if (dragging) e.dragTo(200 + r() * 600, 200 + r() * 300);
+            const ms = e.wake(); e.step(ms < 0 ? 40 : ms);
+            const bad = !sane(e) || !e.act || (e.apple && !e.feeding) || (!e.feeding && e.apple);
+            if (bad) { violations++; if (violations < 4) console.log('  violation seed', seed, 'i', i, e.act && e.act.name, e.feeding, !!e.apple); break; }
+        }
+    }
+    ok(violations === 0, `no invariant violations (${violations})`);
+}
+
+console.log(`\n${pass} passed, ${fail} failed`);
+process.exit(fail ? 1 : 0);

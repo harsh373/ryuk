@@ -1,0 +1,8 @@
+{
+  "uuid": "ryuk@desktop-companion",
+  "name": "Ryuk",
+  "description": "A slow, calm Ryuk that wanders over your whole GNOME desktop. Local only: no account, no network, no autostart of its own.",
+  "shell-version": ["49"],
+  "settings-schema": "org.gnome.shell.extensions.ryuk",
+  "version": 1
+}
