@@ -7,7 +7,7 @@ walking around my Fedora desktop, couldn't find one I liked, and built it.
 It is a GNOME Shell extension. It works offline, has no account or login, and
 does not start by itself when you log in.
 
-![Ryuk on the desktop](docs/image1.png)
+![Ryuk on the desktop](docs/image1.jpg)
 
 **Download:** [latest release](https://github.com/harsh373/ryuk/releases/latest) ·
 **Report a bug:** [issues](https://github.com/harsh373/ryuk/issues)
